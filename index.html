@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Local Encrypted Key Vault</title>
+<style>
+  :root {
+    --bg: #f4f6f9;
+    --card: #ffffff;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --primary: #2563eb;
+    --primary-hover: #1d4ed8;
+    --danger: #dc2626;
+    --border: #d1d5db;
+    --success: #059669;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Sans", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    padding: 16px;
+  }
+  .container {
+    max-width: 860px;
+    margin: 0 auto;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  h1 { font-size: 1.25rem; margin: 0; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  input[type="text"], input[type="password"], textarea, select {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 0.95rem;
+  }
+  button {
+    padding: 9px 14px;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .btn-primary { background: var(--primary); color: #fff; }
+  .btn-primary:hover { background: var(--primary-hover); }
+  .btn-secondary { background: #e5e7eb; color: var(--text); }
+  .btn-secondary:hover { background: #d1d5db; }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .btn-sm { padding: 6px 10px; font-size: 0.82rem; }
+  .hidden { display: none !important; }
+  .status-bar {
+    position: fixed;
+    bottom: 16px;
+    right: 16px;
+    background: #111827;
+    color: #fff;
+    padding: 10px 16px;
+    border-radius: 6px;
+    font-size: 0.88rem;
+    z-index: 100;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  }
+  .item {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    margin-bottom: 10px;
+    background: #fafafa;
+  }
+  .item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .badge {
+    display: inline-block;
+    background: #dbeafe;
+    color: #1e40af;
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    margin-right: 6px;
+  }
+  .key-box {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: #fff;
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    border-radius: 4px;
+    margin: 8px 0;
+    word-break: break-all;
+    font-size: 0.9rem;
+  }
+  .memo { font-size: 0.85rem; color: var(--muted); white-space: pre-wrap; }
+  label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Encrypted Key Vault</h1>
+    <div id="topControls" class="hidden">
+      <span id="dirtyBadge" class="hidden" style="color:#d97706; font-size:0.85rem; font-weight:bold; margin-right:8px;">● 未保存の変更あり</span>
+      <button class="btn-primary btn-sm" onclick="exportEncryptedFile()">暗号化して保存 (JSON)</button>
+      <button class="btn-secondary btn-sm" onclick="lockVault()">ロック</button>
+    </div>
+  </header>
+
+  <!-- ロック画面 -->
+  <div id="unlockView" class="card">
+    <h2 style="margin-top:0; font-size:1.1rem;">1. 暗号化ファイルを開く / 新規作成</h2>
+    <div style="margin-bottom:14px;">
+      <label>既存の暗号化ファイルを選択（secrets.enc.json）</label>
+      <input type="file" id="fileInput" accept=".json">
+    </div>
+    <div style="margin-bottom:14px;">
+      <label>マスターパスワード</label>
+      <input type="password" id="masterPassword" placeholder="マスターパスワードを入力" onkeydown="if(event.key==='Enter') unlockVault()">
+    </div>
+    <div class="row">
+      <button class="btn-primary" onclick="unlockVault()">復号して開く</button>
+      <button class="btn-secondary" onclick="createNewVault()">新規Vaultを作成</button>
+    </div>
+    <p style="font-size:0.82rem; color:var(--muted); margin-bottom:0;">
+      ※ 初めて使う場合はマスターパスワードを入力して「新規Vaultを作成」を押してください。<br>
+      ※ データはブラウザのメモリ上でのみ復号され、端末には保存されません。
+    </p>
+  </div>
+
+  <!-- メイン画面 -->
+  <div id="mainView" class="hidden">
+    <div class="card">
+      <div class="row" style="margin-bottom:0;">
+        <div style="flex:1; min-width:220px;">
+          <input type="text" id="searchInput" placeholder="サービス名・カテゴリ・メモで検索..." oninput="renderList()">
+        </div>
+        <button class="btn-primary" onclick="toggleAddForm()">＋ 新規キー追加</button>
+      </div>
+
+      <!-- 追加・編集フォーム -->
+      <div id="editForm" class="hidden" style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">
+        <input type="hidden" id="editId">
+        <div class="row">
+          <div style="flex:1; min-width:160px;">
+            <label>カテゴリ</label>
+            <select id="itemCategory">
+              <option value="APIキー">APIキー</option>
+              <option value="プロダクトキー">プロダクトキー</option>
+              <option value="シークレット/トークン">シークレット/トークン</option>
+              <option value="その他">その他</option>
+            </select>
+          </div>
+          <div style="flex:2; min-width:220px;">
+            <label>サービス・ソフト名（必須）</label>
+            <input type="text" id="itemTitle" placeholder="例: OpenAI API (本番用) / Office 2024">
+          </div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <label>キー / シークレット値（必須）</label>
+          <input type="text" id="itemSecret" placeholder="sk-... または XXXXX-XXXXX-XXXXX">
+        </div>
+        <div style="margin-bottom:12px;">
+          <label>メモ（発行元URL・有効期限・アカウントなど）</label>
+          <textarea id="itemMemo" rows="2" placeholder="例: 2026-12-31更新 / 管理者アカウント紐付け"></textarea>
+        </div>
+        <div class="row" style="margin-bottom:0;">
+          <button class="btn-primary" onclick="saveItem()">リストに反映</button>
+          <button class="btn-secondary" onclick="cancelEdit()">キャンセル</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="itemList"></div>
+  </div>
+</div>
+
+<div id="toast" class="status-bar hidden"></div>
+
+<script>
+let vaultData = [];
+let currentPassword = "";
+let isDirty = false;
+let revealedIds = new Set();
+let clipboardTimer = null;
+let autoLockTimer = null;
+const AUTO_LOCK_MS = 5 * 60 * 1000; // 5分で自動ロック
+const CLIPBOARD_CLEAR_SEC = 20;     // 20秒でクリップボード消去
+
+function showToast(msg, duration = 3000) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.remove("hidden");
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.classList.add("hidden"), duration);
+}
+
+function resetAutoLock() {
+  clearTimeout(autoLockTimer);
+  if (currentPassword) {
+    autoLockTimer = setTimeout(() => {
+      lockVault();
+      alert("一定時間操作がなかったため自動ロックしました。");
+    }, AUTO_LOCK_MS);
+  }
+}
+["click", "keydown", "mousemove", "touchstart"].forEach(ev =>
+  document.addEventListener(ev, resetAutoLock, { passive: true })
+);
+
+function setDirty(flag) {
+  isDirty = flag;
+  document.getElementById("dirtyBadge").classList.toggle("hidden", !flag);
+}
+
+// Base64変換ユーティリティ
+const bufToB64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const b64ToBuf = b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+
+async function deriveKey(password, salt) {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]
+  );
+  return crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt, iterations: 310000, hash: "SHA-256" },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+async function encryptVault(dataObj, password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveKey(password, salt);
+  const enc = new TextEncoder();
+  const cipherBuf = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    enc.encode(JSON.stringify(dataObj))
+  );
+  return {
+    version: 1,
+    kdf: "PBKDF2-SHA256-310000",
+    cipher: "AES-256-GCM",
+    salt: bufToB64(salt),
+    iv: bufToB64(iv),
+    ciphertext: bufToB64(cipherBuf),
+    updatedAt: new Date().toISOString()
+  };
+}
+
+async function decryptVault(payload, password) {
+  const salt = b64ToBuf(payload.salt);
+  const iv = b64ToBuf(payload.iv);
+  const cipherBuf = b64ToBuf(payload.ciphertext);
+  const key = await deriveKey(password, salt);
+  const plainBuf = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv },
+    key,
+    cipherBuf
+  );
+  return JSON.parse(new TextDecoder().decode(plainBuf));
+}
+
+function createNewVault() {
+  const pw = document.getElementById("masterPassword").value;
+  if (!pw || pw.length < 8) {
+    alert("8文字以上のマスターパスワードを入力してください。");
+    return;
+  }
+  currentPassword = pw;
+  vaultData = [];
+  setDirty(true);
+  openMainView();
+  showToast("新規Vaultを作成しました。キー追加後に保存してください。");
+}
+
+async function unlockVault() {
+  const fileInput = document.getElementById("fileInput");
+  const pw = document.getElementById("masterPassword").value;
+  if (!fileInput.files.length) {
+    alert("暗号化ファイル（secrets.enc.json）を選択してください。新規の場合は「新規Vaultを作成」を押してください。");
+    return;
+  }
+  if (!pw) {
+    alert("マスターパスワードを入力してください。");
+    return;
+  }
+  try {
+    const text = await fileInput.files[0].text();
+    const payload = JSON.parse(text);
+    const decrypted = await decryptVault(payload, pw);
+    vaultData = Array.isArray(decrypted) ? decrypted : [];
+    currentPassword = pw;
+    setDirty(false);
+    openMainView();
+    showToast("復号に成功しました。");
+  } catch (e) {
+    alert("復号に失敗しました。パスワードが誤っているか、ファイル形式が不正です。");
+  }
+}
+
+function openMainView() {
+  document.getElementById("masterPassword").value = "";
+  document.getElementById("unlockView").classList.add("hidden");
+  document.getElementById("mainView").classList.remove("hidden");
+  document.getElementById("topControls").classList.remove("hidden");
+  resetAutoLock();
+  renderList();
+}
+
+function lockVault() {
+  vaultData = [];
+  currentPassword = "";
+  revealedIds.clear();
+  isDirty = false;
+  clearTimeout(autoLockTimer);
+  document.getElementById("itemList").innerHTML = "";
+  document.getElementById("searchInput").value = "";
+  cancelEdit();
+  document.getElementById("mainView").classList.add("hidden");
+  document.getElementById("topControls").classList.add("hidden");
+  document.getElementById("unlockView").classList.remove("hidden");
+}
+
+async function exportEncryptedFile() {
+  if (!currentPassword) return;
+  const encrypted = await encryptVault(vaultData, currentPassword);
+  const blob = new Blob([JSON.stringify(encrypted, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "secrets.enc.json";
+  a.click();
+  URL.revokeObjectURL(url);
+  setDirty(false);
+  showToast("secrets.enc.json を出力しました。Googleドライブ上のファイルを上書きしてください。", 5000);
+}
+
+function toggleAddForm() {
+  const form = document.getElementById("editForm");
+  if (form.classList.contains("hidden")) {
+    document.getElementById("editId").value = "";
+    document.getElementById("itemCategory").value = "APIキー";
+    document.getElementById("itemTitle").value = "";
+    document.getElementById("itemSecret").value = "";
+    document.getElementById("itemMemo").value = "";
+    form.classList.remove("hidden");
+    document.getElementById("itemTitle").focus();
+  } else {
+    cancelEdit();
+  }
+}
+
+function cancelEdit() {
+  document.getElementById("editForm").classList.add("hidden");
+  document.getElementById("editId").value = "";
+}
+
+function saveItem() {
+  const id = document.getElementById("editId").value;
+  const category = document.getElementById("itemCategory").value;
+  const title = document.getElementById("itemTitle").value.trim();
+  const secret = document.getElementById("itemSecret").value.trim();
+  const memo = document.getElementById("itemMemo").value.trim();
+
+  if (!title || !secret) {
+    alert("サービス・ソフト名とキー値は必須です。");
+    return;
+  }
+
+  if (id) {
+    const idx = vaultData.findIndex(x => x.id === id);
+    if (idx !== -1) {
+      vaultData[idx] = { ...vaultData[idx], category, title, secret, memo, updatedAt: new Date().toISOString() };
+    }
+  } else {
+    vaultData.unshift({
+      id: crypto.randomUUID(),
+      category,
+      title,
+      secret,
+      memo,
+      updatedAt: new Date().toISOString()
+    });
+  }
+  setDirty(true);
+  cancelEdit();
+  renderList();
+  showToast("リストに反映しました（「暗号化して保存」でファイル確定）");
+}
+
+function editItem(id) {
+  const item = vaultData.find(x => x.id === id);
+  if (!item) return;
+  document.getElementById("editId").value = item.id;
+  document.getElementById("itemCategory").value = item.category;
+  document.getElementById("itemTitle").value = item.title;
+  document.getElementById("itemSecret").value = item.secret;
+  document.getElementById("itemMemo").value = item.memo || "";
+  document.getElementById("editForm").classList.remove("hidden");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function deleteItem(id) {
+  if (!confirm("この項目を削除しますか？")) return;
+  vaultData = vaultData.filter(x => x.id !== id);
+  revealedIds.delete(id);
+  setDirty(true);
+  renderList();
+}
+
+function toggleReveal(id) {
+  if (revealedIds.has(id)) revealedIds.delete(id);
+  else revealedIds.add(id);
+  renderList();
+}
+
+async function copySecret(id) {
+  const item = vaultData.find(x => x.id === id);
+  if (!item) return;
+  try {
+    await navigator.clipboard.writeText(item.secret);
+    showToast(`「${item.title}」をコピーしました（${CLIPBOARD_CLEAR_SEC}秒後に自動消去）`);
+    clearTimeout(clipboardTimer);
+    clipboardTimer = setTimeout(async () => {
+      try {
+        await navigator.clipboard.writeText(" ");
+        showToast("クリップボードを自動消去しました。");
+      } catch (_) {}
+    }, CLIPBOARD_CLEAR_SEC * 1000);
+  } catch (e) {
+    alert("クリップボードへのコピーに失敗しました。ブラウザの権限を確認してください。");
+  }
+}
+
+function maskSecret(str) {
+  if (str.length <= 8) return "••••••••";
+  return str.slice(0, 4) + "••••••••••••" + str.slice(-4);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, m => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
+}
+
+function renderList() {
+  const q = document.getElementById("searchInput").value.trim().toLowerCase();
+  const listEl = document.getElementById("itemList");
+  const filtered = vaultData.filter(item =>
+    !q ||
+    item.title.toLowerCase().includes(q) ||
+    item.category.toLowerCase().includes(q) ||
+    (item.memo && item.memo.toLowerCase().includes(q))
+  );
+
+  if (!filtered.length) {
+    listEl.innerHTML = `<div class="card" style="text-align:center; color:var(--muted);">該当する項目がありません。</div>`;
+    return;
+  }
+
+  listEl.innerHTML = filtered.map(item => {
+    const shown = revealedIds.has(item.id);
+    const displayKey = shown ? escapeHtml(item.secret) : escapeHtml(maskSecret(item.secret));
+    return `
+      <div class="item">
+        <div class="item-header">
+          <div>
+            <span class="badge">${escapeHtml(item.category)}</span>
+            <strong>${escapeHtml(item.title)}</strong>
+          </div>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button class="btn-primary btn-sm" onclick="copySecret('${item.id}')">コピー</button>
+            <button class="btn-secondary btn-sm" onclick="toggleReveal('${item.id}')">${shown ? "隠す" : "表示"}</button>
+            <button class="btn-secondary btn-sm" onclick="editItem('${item.id}')">編集</button>
+            <button class="btn-danger btn-sm" onclick="deleteItem('${item.id}')">削除</button>
+          </div>
+        </div>
+        <div class="key-box">${displayKey}</div>
+        ${item.memo ? `<div class="memo">${escapeHtml(item.memo)}</div>` : ""}
+      </div>
+    `;
+  }).join("");
+}
+
+window.addEventListener("beforeunload", e => {
+  if (isDirty) {
+    e.preventDefault();
+    e.returnValue = "";
+  }
+});
+</script>
+</body>
+</html>
