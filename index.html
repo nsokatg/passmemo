@@ -4,6 +4,7 @@
 <link rel="apple-touch-icon" href="/passmemo/icon.png">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob:; connect-src 'none';">
 <title>Local Encrypted Key Vault</title>
 <style>
   :root {
@@ -17,7 +18,7 @@
     --border: #d1d5db;
     --success: #059669;
   }
-  * { box-sizing: border-box; }
+  *, *::before, *::after { box-sizing: border-box; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Sans", sans-serif;
     background: var(--bg);
@@ -47,12 +48,20 @@
     box-shadow: 0 1px 2px rgba(0,0,0,0.05);
   }
   .row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
-  input[type="text"], input[type="password"], textarea, select {
+  input[type="text"], textarea, select {
     width: 100%;
     padding: 10px;
     border: 1px solid var(--border);
     border-radius: 6px;
     font-size: 0.95rem;
+  }
+  .masked-input {
+    -webkit-text-security: disc;
+    text-security: disc;
+  }
+  .masked-input.revealed {
+    -webkit-text-security: none;
+    text-security: none;
   }
   button {
     padding: 9px 14px;
@@ -137,16 +146,31 @@
       <input type="file" id="fileInput" accept=".json">
     </div>
     <div style="margin-bottom:14px;">
-      <label>マスターパスワード</label>
-      <input type="password" id="masterPassword" placeholder="マスターパスワードを入力" onkeydown="if(event.key==='Enter') unlockVault()">
+      <label>マスターキー（復号用パスフレーズ）</label>
+      <div style="display:flex; gap:8px;">
+        <input
+          type="text"
+          id="masterPassword"
+          class="masked-input"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+          data-lpignore="true"
+          data-form-type="other"
+          placeholder="Vault専用パスフレーズを入力"
+          onkeydown="if(event.key==='Enter') unlockVault()"
+        >
+        <button type="button" class="btn-secondary btn-sm" onclick="togglePassphraseVisibility()" style="white-space:nowrap;">表示切替</button>
+      </div>
     </div>
     <div class="row">
       <button class="btn-primary" onclick="unlockVault()">復号して開く</button>
       <button class="btn-secondary" onclick="createNewVault()">新規Vaultを作成</button>
     </div>
     <p style="font-size:0.82rem; color:var(--muted); margin-bottom:0;">
-      ※ 初めて使う場合はマスターパスワードを入力して「新規Vaultを作成」を押してください。<br>
-      ※ データはブラウザのメモリ上でのみ復号され、端末には保存されません。
+      ※ 初めて使う場合はパスフレーズを入力して「新規Vaultを作成」を押してください。<br>
+      ※ データはブラウザのメモリ上でのみ復号され、外部サーバーへ送信・保存されません。
     </p>
   </div>
 
@@ -206,8 +230,8 @@ let isDirty = false;
 let revealedIds = new Set();
 let clipboardTimer = null;
 let autoLockTimer = null;
-const AUTO_LOCK_MS = 5 * 60 * 1000; // 5分で自動ロック
-const CLIPBOARD_CLEAR_SEC = 20;     // 20秒でクリップボード消去
+const AUTO_LOCK_MS = 5 * 60 * 1000;
+const CLIPBOARD_CLEAR_SEC = 20;
 
 function showToast(msg, duration = 3000) {
   const el = document.getElementById("toast");
@@ -215,6 +239,11 @@ function showToast(msg, duration = 3000) {
   el.classList.remove("hidden");
   clearTimeout(el._timer);
   el._timer = setTimeout(() => el.classList.add("hidden"), duration);
+}
+
+function togglePassphraseVisibility() {
+  const input = document.getElementById("masterPassword");
+  input.classList.toggle("revealed");
 }
 
 function resetAutoLock() {
@@ -235,7 +264,6 @@ function setDirty(flag) {
   document.getElementById("dirtyBadge").classList.toggle("hidden", !flag);
 }
 
-// Base64変換ユーティリティ
 const bufToB64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
 const b64ToBuf = b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
 
@@ -290,7 +318,7 @@ async function decryptVault(payload, password) {
 function createNewVault() {
   const pw = document.getElementById("masterPassword").value;
   if (!pw || pw.length < 8) {
-    alert("8文字以上のマスターパスワードを入力してください。");
+    alert("8文字以上のマスターキーを入力してください。");
     return;
   }
   currentPassword = pw;
@@ -308,7 +336,7 @@ async function unlockVault() {
     return;
   }
   if (!pw) {
-    alert("マスターパスワードを入力してください。");
+    alert("マスターキーを入力してください。");
     return;
   }
   try {
@@ -321,12 +349,14 @@ async function unlockVault() {
     openMainView();
     showToast("復号に成功しました。");
   } catch (e) {
-    alert("復号に失敗しました。パスワードが誤っているか、ファイル形式が不正です。");
+    alert("復号に失敗しました。パスフレーズが誤っているか、ファイル形式が不正です。");
   }
 }
 
 function openMainView() {
-  document.getElementById("masterPassword").value = "";
+  const pwInput = document.getElementById("masterPassword");
+  pwInput.value = "";
+  pwInput.classList.remove("revealed");
   document.getElementById("unlockView").classList.add("hidden");
   document.getElementById("mainView").classList.remove("hidden");
   document.getElementById("topControls").classList.remove("hidden");
